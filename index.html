@@ -415,6 +415,11 @@
             <div class="tab" data-face="left">Left Side</div>
             <div class="tab" data-face="right">Right Side</div>
         </div>
+        
+        <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 20px;">
+            <label for="face-bg-color" style="font-size: 14px; font-weight: 600;">Base Color:</label>
+            <input type="color" id="face-bg-color" value="#f8f8f8" style="background: none; border: none; cursor: pointer; width: 32px; height: 32px; padding: 0;">
+        </div>
 
         <div class="toolbar">
             <div class="file-upload-wrapper">
@@ -688,11 +693,11 @@
         
         // Data structure for layers: state.faces[faceName].layers = [{ id, x, y, width, height, image, zIndex }]
         state.faces = {
-            front: { layers: [] },
-            back: { layers: [] },
-            top: { layers: [] },
-            left: { layers: [] },
-            right: { layers: [] }
+            front: { layers: [], bgColor: '#f8f8f8' },
+            back: { layers: [], bgColor: '#f8f8f8' },
+            top: { layers: [], bgColor: '#f8f8f8' },
+            left: { layers: [], bgColor: '#f8f8f8' },
+            right: { layers: [], bgColor: '#f8f8f8' }
         };
         state.activeLayerId = null;
 
@@ -750,11 +755,12 @@
             // Clear UI Canvas
             uiCtx.clearRect(0, 0, uiCanvas.width, uiCanvas.height);
             
-            // Draw slight gradient background like the tin material
-            uiCtx.fillStyle = '#f8f8f8';
+            const faceState = getActiveFaceState();
+            
+            // Draw background color
+            uiCtx.fillStyle = faceState.bgColor;
             uiCtx.fillRect(0, 0, uiCanvas.width, uiCanvas.height);
 
-            const faceState = getActiveFaceState();
             // Sort layers by zIndex for rendering
             const sortedLayers = [...faceState.layers].sort((a, b) => a.zIndex - b.zIndex);
             
@@ -805,12 +811,11 @@
         function renderFaceTexture(face) {
             const canvas = faceTextures[face];
             const ctx = canvas.getContext('2d');
+            const faceState = state.faces[face];
             
             // Reset background
-            ctx.fillStyle = '#f8f8f8';
+            ctx.fillStyle = faceState.bgColor;
             ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-            const faceState = state.faces[face];
             const sortedLayers = [...faceState.layers].sort((a, b) => a.zIndex - b.zIndex);
 
             sortedLayers.forEach(layer => {
@@ -980,19 +985,28 @@
              resizeUICanvas();
         });
 
-        // Tab Switching
-        const tabs = document.querySelectorAll('.tab');
-        tabs.forEach(tab => {
+        // Change Active Face
+        document.querySelectorAll('.tab').forEach(tab => {
             tab.addEventListener('click', (e) => {
-                tabs.forEach(t => t.classList.remove('active'));
-                tab.classList.add('active');
-                state.activeFace = tab.dataset.face;
-                state.activeLayerId = null; // deselect on switch
-                resizeUICanvas(); // recalculate ratio and redraw
+                document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+                e.target.classList.add('active');
+                state.activeFace = e.target.dataset.face;
+                state.activeLayerId = null;
                 
-                // Optional: Rotate camera to face the active side roughly
+                // Update color picker UI to match new face
+                const faceState = getActiveFaceState();
+                document.getElementById('face-bg-color').value = faceState.bgColor;
+                
+                resizeUICanvas(); // recalculate ratio and redraw
                 rotateCameraToFace(state.activeFace);
             });
+        });
+
+        // Handle Background Color Change
+        document.getElementById('face-bg-color').addEventListener('input', (e) => {
+            const faceState = getActiveFaceState();
+            faceState.bgColor = e.target.value;
+            renderAll();
         });
         
         function rotateCameraToFace(face) {
@@ -1097,6 +1111,7 @@
             const data = { faces: {} };
             for(const face of Object.keys(state.faces)) {
                 data.faces[face] = {
+                    bgColor: state.faces[face].bgColor,
                     layers: state.faces[face].layers.map(l => ({
                         id: l.id,
                         base64: l.base64,
@@ -1120,7 +1135,12 @@
                 // Clear current
                 for(const face of Object.keys(state.faces)) {
                     state.faces[face].layers = [];
+                    // Restore bg color if present, else default
+                    state.faces[face].bgColor = data.faces[face].bgColor || '#f8f8f8';
                 }
+                
+                // Update color picker UI to match the restored active face
+                document.getElementById('face-bg-color').value = state.faces[state.activeFace].bgColor;
                 
                 // Load all images for all layers
                 const loadPromises = [];
