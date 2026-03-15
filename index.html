@@ -419,6 +419,9 @@
         <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 20px;">
             <label for="face-bg-color" style="font-size: 14px; font-weight: 600;">Base Color:</label>
             <input type="color" id="face-bg-color" value="#f8f8f8" style="background: none; border: none; cursor: pointer; width: 32px; height: 32px; padding: 0;">
+            <div style="width: 1px; height: 24px; background: var(--panel-border); margin: 0 10px;"></div>
+            <label for="toothpick-color" style="font-size: 14px; font-weight: 600;">Toothpicks:</label>
+            <input type="color" id="toothpick-color" value="#e3c38b" style="background: none; border: none; cursor: pointer; width: 32px; height: 32px; padding: 0;">
         </div>
 
         <div class="toolbar">
@@ -472,7 +475,8 @@
         {
             "imports": {
                 "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/",
+                "cannon-es": "https://unpkg.com/cannon-es@0.20.0/dist/cannon-es.js"
             }
         }
     </script>
@@ -480,6 +484,7 @@
         import * as THREE from 'three';
         import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
         import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+        import * as CANNON from 'cannon-es';
 
         // --- App State ---
         const state = {
@@ -488,7 +493,8 @@
             layerDragState: null, // Track dragging
             resizeState: null,    // Track resizing
             lidOpen: false,       // Track lid state
-            lidAngle: 0           // Current animated angle
+            lidAngle: 0,          // Current animated angle
+            toothpickColor: '#e3c38b' // Default birchwood color
         };
 
         // Texture Canvases (Off-screen)
@@ -575,6 +581,20 @@
         rimLight.position.set(0, 5, -10);
         scene.add(rimLight);
 
+        // --- Physics Setup (Cannon-es) ---
+        const world = new CANNON.World({
+            gravity: new CANNON.Vec3(0, -9.81, 0), // Will be updated dynamically in animate loop
+            allowSleep: true,
+        });
+        
+        // Define materials for friction/bounciness
+        const physicsMaterial = new CANNON.Material('standard');
+        const contactMaterial = new CANNON.ContactMaterial(physicsMaterial, physicsMaterial, {
+            friction: 0.3,
+            restitution: 0.2, // slight bounce
+        });
+        world.addContactMaterial(contactMaterial);
+
         // --- Tin Geometry Construction ---
         // Dimensions: width, height, depth
         // Standing upright: width=35mm, height=70mm, depth=15mm.
@@ -596,8 +616,6 @@
         });
 
         // 1. Tin Body (Main container)
-        // Note: Realistically a tin is hollow, but for a simple visualiser 
-        // a solid block with textures on the 4 sides is visually sufficient and cleaner to map.
         const bodyGeo = new RoundedBoxGeometry(tinW, tinH, tinD, smoothness, radius);
         
         // Materials array for the body:
@@ -607,15 +625,73 @@
         const frontMat = new THREE.MeshStandardMaterial({ map: threeTextures.front, roughness: 0.6, metalness: 0.1 });
         const backMat = new THREE.MeshStandardMaterial({ map: threeTextures.back, roughness: 0.6, metalness: 0.1 });
         
-        // Top of body is hidden by lid, bottom is generic silver
+        // Make the top invisible so the inside shows
+        const invisibleTop = new THREE.MeshBasicMaterial({ visible: false });
+
         const bodyMaterials = [
-            rightMat, leftMat, silverMaterial, silverMaterial, frontMat, backMat
+            rightMat, leftMat, invisibleTop, silverMaterial, frontMat, backMat
         ];
         
         const bodyMesh = new THREE.Mesh(bodyGeo, bodyMaterials);
         bodyMesh.castShadow = true;
         bodyMesh.receiveShadow = true;
         tinGroup.add(bodyMesh);
+
+        // Inner Shell (Hollow cavity)
+        // Slightly smaller than outer shell, rendering on the BackSide
+        const wallThickness = 0.08;
+        const innerGeo = new RoundedBoxGeometry(
+            tinW - wallThickness*2, 
+            tinH - wallThickness, // Leave top open
+            tinD - wallThickness*2, 
+            smoothness, 
+            Math.max(0.01, radius - wallThickness)
+        );
+        const innerMat = new THREE.MeshStandardMaterial({
+            color: 0x999999,
+            roughness: 0.5,
+            metalness: 0.6,
+            side: THREE.BackSide,
+            envMapIntensity: 0.8
+        });
+        const invisibleInnerTop = new THREE.MeshBasicMaterial({ visible: false, side: THREE.BackSide });
+        const innerMaterials = [innerMat, innerMat, invisibleInnerTop, innerMat, innerMat, innerMat];
+        const innerMesh = new THREE.Mesh(innerGeo, innerMaterials);
+        // Shift it up slightly so the bottom floor isn't z-fighting, and top reaches the edge
+        innerMesh.position.y = wallThickness / 2;
+        tinGroup.add(innerMesh);
+
+        // Top Rim to cover the gap between inner and outer shells
+        // We can create a simple flat frame shape via CSG or ExtrudeGeometry,
+        // but for simplicity, 4 small boxes acting as the rim lips work well.
+        const rimMat = silverMaterial;
+        const rimTopW = new THREE.Mesh(new THREE.BoxGeometry(tinW, wallThickness, wallThickness), rimMat);
+        rimTopW.position.set(0, tinH/2 - wallThickness/2, tinD/2 - wallThickness/2);
+        tinGroup.add(rimTopW);
+        const rimBotW = new THREE.Mesh(new THREE.BoxGeometry(tinW, wallThickness, wallThickness), rimMat);
+        rimBotW.position.set(0, tinH/2 - wallThickness/2, -tinD/2 + wallThickness/2);
+        tinGroup.add(rimBotW);
+        const rimLeftD = new THREE.Mesh(new THREE.BoxGeometry(wallThickness, wallThickness, tinD - wallThickness*2), rimMat);
+        rimLeftD.position.set(-tinW/2 + wallThickness/2, tinH/2 - wallThickness/2, 0);
+        tinGroup.add(rimLeftD);
+        const rimRightD = new THREE.Mesh(new THREE.BoxGeometry(wallThickness, wallThickness, tinD - wallThickness*2), rimMat);
+        rimRightD.position.set(tinW/2 - wallThickness/2, tinH/2 - wallThickness/2, 0);
+        tinGroup.add(rimRightD);
+
+        // --- CANNON Physics Static Walls ---
+        const wallBody = new CANNON.Body({ type: CANNON.Body.STATIC, material: physicsMaterial });
+        // Instead of one hollow box, create 5 planes/boxes for the inner cavity
+        // Floor
+        wallBody.addShape(new CANNON.Box(new CANNON.Vec3(tinW/2, wallThickness/2, tinD/2)), new CANNON.Vec3(0, -tinH/2 + wallThickness/2, 0));
+        // Left
+        wallBody.addShape(new CANNON.Box(new CANNON.Vec3(wallThickness/2, tinH/2, tinD/2)), new CANNON.Vec3(-tinW/2 + wallThickness/2, 0, 0));
+        // Right
+        wallBody.addShape(new CANNON.Box(new CANNON.Vec3(wallThickness/2, tinH/2, tinD/2)), new CANNON.Vec3(tinW/2 - wallThickness/2, 0, 0));
+        // Front
+        wallBody.addShape(new CANNON.Box(new CANNON.Vec3(tinW/2, tinH/2, wallThickness/2)), new CANNON.Vec3(0, 0, tinD/2 - wallThickness/2));
+        // Back
+        wallBody.addShape(new CANNON.Box(new CANNON.Vec3(tinW/2, tinH/2, wallThickness/2)), new CANNON.Vec3(0, 0, -tinD/2 + wallThickness/2));
+        world.addBody(wallBody);
 
         // 2. Tin Lid (Hinged at the back top edge)
         const lidThickness = 0.3;
@@ -642,6 +718,12 @@
         // It should span +Z from the hinge.
         lidMesh.position.set(0, lidThickness/2, tinD/2);
         hingeGroup.add(lidMesh);
+
+        // CANNON Kinematic Lid
+        const lidShape = new CANNON.Box(new CANNON.Vec3(tinW/2, lidThickness/2, tinD/2));
+        const lidBody = new CANNON.Body({ mass: 0, type: CANNON.Body.KINEMATIC, material: physicsMaterial });
+        lidBody.addShape(lidShape);
+        world.addBody(lidBody);
         
         // --- Added Details: Rolled Rim, 3-Part Hinge, and Clasp ---
         const lidRimGeo = new RoundedBoxGeometry(tinW + 0.12, 0.06, tinD + 0.12, smoothness, radius + 0.02);
@@ -686,6 +768,66 @@
         // Center the whole tin group
         tinGroup.position.y = 0;
 
+        // --- Toothpicks ---
+        const pickRadius = 0.05;
+        const pickLength = tinH - 1.5; // Make them slightly shorter to fit perfectly inside
+        const pickCount = 30;
+
+        // Visual Geometry
+        const pickGeo = new THREE.CylinderGeometry(0.01, pickRadius, pickLength, 6);
+        // Make the ends pointy
+        const pickGeometries = [];
+        const middleGeo = new THREE.CylinderGeometry(pickRadius, pickRadius, pickLength - 0.4, 6);
+        const topTipGeo = new THREE.CylinderGeometry(0.01, pickRadius, 0.2, 6);
+        topTipGeo.translate(0, pickLength/2 - 0.1, 0);
+        const botTipGeo = new THREE.CylinderGeometry(pickRadius, 0.01, 0.2, 6);
+        botTipGeo.translate(0, -pickLength/2 + 0.1, 0);
+
+        // Merge them for a nice toothpick shape, but standard cylinder is fine and faster for simple rendering.
+        // We'll use just a tapered cylinder for performance and simplicity in InstancedMesh.
+        const mergedPickGeo = new THREE.CylinderGeometry(0.02, 0.02, pickLength, 6);
+
+        const pickMat = new THREE.MeshStandardMaterial({
+            color: state.toothpickColor,
+            roughness: 0.8,
+            metalness: 0.0
+        });
+
+        const picksInstancedMesh = new THREE.InstancedMesh(mergedPickGeo, pickMat, pickCount);
+        picksInstancedMesh.castShadow = true;
+        picksInstancedMesh.receiveShadow = true;
+        scene.add(picksInstancedMesh);
+
+        // Physics Bodies for Toothpicks
+        const picksBodies = [];
+        const pickShape = new CANNON.Cylinder(0.03, 0.03, pickLength, 6); // slightly thicker for stable physics
+        
+        // Spawn them inside the tin cavity
+        for(let i=0; i<pickCount; i++) {
+            const body = new CANNON.Body({
+                mass: 0.1,
+                material: physicsMaterial,
+                position: new CANNON.Vec3(
+                    (Math.random() - 0.5) * (tinW - 0.8), // Keep mostly localized in width
+                    (Math.random() - 0.5) * (tinH - 2.0) + (tinH / 4), // Spawn well above the floor but inside
+                    (Math.random() - 0.5) * (tinD - 0.8) // Keep inside depth walls
+                ),
+            });
+            // Rotate slightly to break perfect stacking
+            body.quaternion.setFromEuler(
+                (Math.random() - 0.5) * 0.2,
+                (Math.random() - 0.5) * Math.PI,
+                (Math.random() - 0.5) * 0.2
+            );
+            // Change CANNON cylinder alignment to match THREE's Y-up cylinder
+            const q = new CANNON.Quaternion();
+            q.setFromAxisAngle(new CANNON.Vec3(1, 0, 0), -Math.PI / 2);
+            body.addShape(pickShape, new CANNON.Vec3(0, 0, 0), q);
+
+            world.addBody(body);
+            picksBodies.push(body);
+        }
+
         // Simple invisible floor to catch shadows
         const floorGeo = new THREE.PlaneGeometry(50, 50);
         const floorMat = new THREE.ShadowMaterial({ opacity: 0.2 });
@@ -703,14 +845,62 @@
         });
 
         // --- Animation Loop ---
+        const clock = new THREE.Clock();
+
+        // Reusable objects for gravity calculation
+        const cameraDown = new THREE.Vector3();
+        const yAxis = new THREE.Vector3(0, -1, 0);
+
         function animate() {
             requestAnimationFrame(animate);
+            const dt = clock.getDelta();
+
             controls.update();
+
+            // Calculate View-Relative Gravity
+            // We want gravity to always point towards the bottom of the screen
+            // The camera's local -Y axis represents "down" on the screen.
+            cameraDown.copy(yAxis).transformDirection(camera.matrixWorld);
+            world.gravity.set(cameraDown.x * 9.81, cameraDown.y * 9.81, cameraDown.z * 9.81);
+
+            // Step Physics World
+            world.step(1/60, dt, 3);
 
             // Animate lid - rotate along X axis to flip lid backwards/upwards
             const targetAngle = state.lidOpen ? -Math.PI * 0.6 : 0; // open 108 degrees
             state.lidAngle += (targetAngle - state.lidAngle) * 0.1;
             hingeGroup.rotation.x = state.lidAngle;
+
+            // Sync Cannon Kinematic Lid with Three.js LidMesh
+            // Get world position and quaternion of the lidMesh
+            const tempPos = new THREE.Vector3();
+            const tempQuat = new THREE.Quaternion();
+            lidMesh.getWorldPosition(tempPos);
+            lidMesh.getWorldQuaternion(tempQuat);
+            lidBody.position.copy(tempPos);
+            lidBody.quaternion.copy(tempQuat);
+
+            // Sync Toothpicks
+            const dummy = new THREE.Object3D();
+            for(let i=0; i<pickCount; i++) {
+                const b = picksBodies[i];
+                dummy.position.copy(b.position);
+                dummy.quaternion.copy(b.quaternion);
+                dummy.updateMatrix();
+                picksInstancedMesh.setMatrixAt(i, dummy.matrix);
+
+                // Auto-respawn if they fall into the void
+                if(b.position.y < -20) {
+                    b.position.set(
+                        (Math.random() - 0.5) * (tinW - 0.5),
+                        tinH + 2 + Math.random(), // drop from slightly above the open lid
+                        (Math.random() - 0.5) * (tinD - 0.5)
+                    );
+                    b.velocity.set(0,0,0);
+                    b.angularVelocity.set(0,0,0);
+                }
+            }
+            picksInstancedMesh.instanceMatrix.needsUpdate = true;
 
             renderer.render(scene, camera);
         }
@@ -1045,6 +1235,12 @@
             const faceState = getActiveFaceState();
             faceState.bgColor = e.target.value;
             renderAll();
+        });
+
+        // Handle Toothpick Color Change
+        document.getElementById('toothpick-color').addEventListener('input', (e) => {
+            state.toothpickColor = e.target.value;
+            pickMat.color.set(state.toothpickColor);
         });
         
         function rotateCameraToFace(face) {
