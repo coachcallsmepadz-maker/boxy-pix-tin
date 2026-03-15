@@ -618,7 +618,7 @@
         tinGroup.add(bodyMesh);
 
         // 2. Tin Lid (Hinged at the back top edge)
-        const lidThickness = 0.2;
+        const lidThickness = 0.3;
         const lidGeo = new RoundedBoxGeometry(tinW + 0.05, lidThickness, tinD + 0.05, smoothness, radius);
         
         // Materials for Lid:
@@ -643,7 +643,45 @@
         lidMesh.position.set(0, lidThickness/2, tinD/2);
         hingeGroup.add(lidMesh);
         
+        // --- Added Details: Rolled Rim, 3-Part Hinge, and Clasp ---
+        const lidRimGeo = new RoundedBoxGeometry(tinW + 0.12, 0.06, tinD + 0.12, smoothness, radius + 0.02);
+        const lidRim = new THREE.Mesh(lidRimGeo, silverMaterial);
+        lidRim.castShadow = true;
+        lidRim.position.set(0, 0.03, tinD/2);
+        hingeGroup.add(lidRim);
+        
+        const knuckleRadius = 0.07;
+        const knuckleLength = 0.5;
+        const knuckleGeo = new THREE.CylinderGeometry(knuckleRadius, knuckleRadius, knuckleLength, 16);
+        knuckleGeo.rotateZ(Math.PI / 2);
+        
+        // Inner hinge (attached to lid)
+        const centerKnuckle = new THREE.Mesh(knuckleGeo, silverMaterial);
+        centerKnuckle.position.set(0, -knuckleRadius + 0.02, -0.01);
+        hingeGroup.add(centerKnuckle);
+        
         tinGroup.add(hingeGroup);
+
+        // Outer hinges (attached to body)
+        const outerKnuckles = new THREE.Group();
+        outerKnuckles.position.copy(hingeGroup.position);
+        outerKnuckles.position.y -= knuckleRadius - 0.02;
+        outerKnuckles.position.z -= 0.01;
+        
+        const leftKnuckle = new THREE.Mesh(knuckleGeo, silverMaterial);
+        leftKnuckle.position.set(-0.6, 0, 0);
+        outerKnuckles.add(leftKnuckle);
+        
+        const rightKnuckle = new THREE.Mesh(knuckleGeo, silverMaterial);
+        rightKnuckle.position.set(0.6, 0, 0);
+        outerKnuckles.add(rightKnuckle);
+        tinGroup.add(outerKnuckles);
+
+        // Front Clasp Indent
+        const claspGeo = new RoundedBoxGeometry(0.7, 0.15, 0.08, 4, 0.02);
+        const claspMesh = new THREE.Mesh(claspGeo, silverMaterial);
+        claspMesh.position.set(0, tinH/2 - 0.1, tinD/2 + 0.02);
+        tinGroup.add(claspMesh);
 
         // Center the whole tin group
         tinGroup.position.y = 0;
