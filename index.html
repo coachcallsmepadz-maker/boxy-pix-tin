@@ -774,10 +774,10 @@
         tinGroup.position.y = 0;
 
         // --- Toothpicks ---
-        const pickRadiusCenter = 0.03;
-        const pickRadiusTip = 0.002;
+        const pickRadiusCenter = 0.06;
+        const pickRadiusTip = 0.008;
         const pickLength = tinH - 0.7; // Reach close to the rim
-        const pickCount = 200; // Dense packing
+        const pickCount = 90; // Dense packing
 
         // Visual Geometry: Tapered at both ends to match reference image
         const tipLength = pickLength * 0.25;
@@ -806,7 +806,7 @@
         // Pack them neatly inside the tin cavity
         const dummy = new THREE.Object3D();
         const cols = 15;
-        const rows = 14;
+        const rows = 6;
         const spacingX = (tinW - 0.6 - pickRadiusCenter*2) / cols;
         const spacingZ = (tinD - 0.6 - pickRadiusCenter*2) / rows;
         const startX = -((cols-1) * spacingX) / 2;
