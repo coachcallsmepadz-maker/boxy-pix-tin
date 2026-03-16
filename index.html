@@ -419,9 +419,9 @@
         <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 20px;">
             <label for="face-bg-color" style="font-size: 14px; font-weight: 600;">Base Color:</label>
             <input type="color" id="face-bg-color" value="#f8f8f8" style="background: none; border: none; cursor: pointer; width: 32px; height: 32px; padding: 0;">
-            <div style="width: 1px; height: 24px; background: var(--panel-border); margin: 0 10px;"></div>
-            <label for="toothpick-color" style="font-size: 14px; font-weight: 600;">Toothpicks:</label>
-            <input type="color" id="toothpick-color" value="#e3c38b" style="background: none; border: none; cursor: pointer; width: 32px; height: 32px; padding: 0;">
+            <div style="width: 1px; height: 24px; background: var(--panel-border); margin: 0 10px; display: none;"></div>
+            <label for="toothpick-color" style="font-size: 14px; font-weight: 600; display: none;">Toothpicks:</label>
+            <input type="color" id="toothpick-color" value="#e3c38b" style="background: none; border: none; cursor: pointer; width: 32px; height: 32px; padding: 0; display: none;">
         </div>
 
         <div class="toolbar">
@@ -774,7 +774,7 @@
         // --- Toothpicks ---
         const pickRadius = 0.05;
         const pickLength = tinH - 1.5; // Make them slightly shorter to fit perfectly inside
-        const pickCount = 30;
+        const pickCount = 0; // Temporarily removed per user request
 
         // Visual Geometry
         const pickGeo = new THREE.CylinderGeometry(0.01, pickRadius, pickLength, 6);
