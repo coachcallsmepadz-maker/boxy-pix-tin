@@ -494,7 +494,8 @@
             resizeState: null,    // Track resizing
             lidOpen: false,       // Track lid state
             lidAngle: 0,          // Current animated angle
-            toothpickColor: '#e3c38b' // Default birchwood color
+            toothpickColor: '#e3c38b', // Default birchwood color
+            physicsActive: false
         };
 
         // Texture Canvases (Off-screen)
@@ -556,6 +557,7 @@
         const controls = new OrbitControls(camera, renderer.domElement);
         controls.enableDamping = true;
         controls.dampingFactor = 0.05;
+        controls.enableRotate = false; // Disable camera rotation, we manually rotate the tin instead
         controls.minDistance = 2;
         controls.maxDistance = 15;
         controls.target.set(0, 0, 0);
@@ -679,18 +681,19 @@
         tinGroup.add(rimRightD);
 
         // --- CANNON Physics Static Walls ---
-        const wallBody = new CANNON.Body({ type: CANNON.Body.STATIC, material: physicsMaterial });
+        const physT = 0.5; // thick collision walls
+        const wallBody = new CANNON.Body({ type: CANNON.Body.KINEMATIC, material: physicsMaterial });
         // Instead of one hollow box, create 5 planes/boxes for the inner cavity
         // Floor
-        wallBody.addShape(new CANNON.Box(new CANNON.Vec3(tinW/2, wallThickness/2, tinD/2)), new CANNON.Vec3(0, -tinH/2 + wallThickness/2, 0));
-        // Left
-        wallBody.addShape(new CANNON.Box(new CANNON.Vec3(wallThickness/2, tinH/2, tinD/2)), new CANNON.Vec3(-tinW/2 + wallThickness/2, 0, 0));
-        // Right
-        wallBody.addShape(new CANNON.Box(new CANNON.Vec3(wallThickness/2, tinH/2, tinD/2)), new CANNON.Vec3(tinW/2 - wallThickness/2, 0, 0));
-        // Front
-        wallBody.addShape(new CANNON.Box(new CANNON.Vec3(tinW/2, tinH/2, wallThickness/2)), new CANNON.Vec3(0, 0, tinD/2 - wallThickness/2));
-        // Back
-        wallBody.addShape(new CANNON.Box(new CANNON.Vec3(tinW/2, tinH/2, wallThickness/2)), new CANNON.Vec3(0, 0, -tinD/2 + wallThickness/2));
+        wallBody.addShape(new CANNON.Box(new CANNON.Vec3(tinW/2, physT/2, tinD/2)), new CANNON.Vec3(0, -tinH/2 + wallThickness - physT/2, 0));
+        // Left (-X)
+        wallBody.addShape(new CANNON.Box(new CANNON.Vec3(physT/2, tinH/2, tinD/2)), new CANNON.Vec3(-tinW/2 + wallThickness - physT/2, 0, 0));
+        // Right (+X)
+        wallBody.addShape(new CANNON.Box(new CANNON.Vec3(physT/2, tinH/2, tinD/2)), new CANNON.Vec3(tinW/2 - wallThickness + physT/2, 0, 0));
+        // Front (+Z)
+        wallBody.addShape(new CANNON.Box(new CANNON.Vec3(tinW/2, tinH/2, physT/2)), new CANNON.Vec3(0, 0, tinD/2 - wallThickness + physT/2));
+        // Back (-Z)
+        wallBody.addShape(new CANNON.Box(new CANNON.Vec3(tinW/2, tinH/2, physT/2)), new CANNON.Vec3(0, 0, -tinD/2 + wallThickness - physT/2));
         world.addBody(wallBody);
 
         // 2. Tin Lid (Hinged at the back top edge)
@@ -800,32 +803,40 @@
 
         // Physics Bodies for Toothpicks
         const picksBodies = [];
-        const pickShape = new CANNON.Cylinder(0.03, 0.03, pickLength, 6); // slightly thicker for stable physics
+        // Use a Box shape. CANNON.Cylinder is notoriously buggy with face-to-face stacking in cannon-es and causes explosions.
+        const pickShape = new CANNON.Box(new CANNON.Vec3(0.02, pickLength/2, 0.02)); 
+        const pickLocalData = []; // Store perfect local offsets
         
-        // Spawn them inside the tin cavity
+        const cols = 5;
+        const rows = 6;
+        const spacingX = (tinW - 0.4 - pickRadius*2) / cols;
+        const spacingZ = (tinD - 0.4 - pickRadius*2) / rows;
+        const startX = -((cols-1) * spacingX) / 2;
+        const startZ = -((rows-1) * spacingZ) / 2;
+
+        // Spawn them neatly inside the tin cavity
         for(let i=0; i<pickCount; i++) {
             const body = new CANNON.Body({
                 mass: 0.1,
                 material: physicsMaterial,
-                position: new CANNON.Vec3(
-                    (Math.random() - 0.5) * (tinW - 0.8), // Keep mostly localized in width
-                    (Math.random() - 0.5) * (tinH - 2.0) + (tinH / 4), // Spawn well above the floor but inside
-                    (Math.random() - 0.5) * (tinD - 0.8) // Keep inside depth walls
-                ),
+                allowSleep: true,
+                sleepSpeedLimit: 0.1,
+                sleepTimeLimit: 0.5
             });
-            // Rotate slightly to break perfect stacking
-            body.quaternion.setFromEuler(
-                (Math.random() - 0.5) * 0.2,
-                (Math.random() - 0.5) * Math.PI,
-                (Math.random() - 0.5) * 0.2
-            );
-            // Change CANNON cylinder alignment to match THREE's Y-up cylinder
-            const q = new CANNON.Quaternion();
-            q.setFromAxisAngle(new CANNON.Vec3(1, 0, 0), -Math.PI / 2);
-            body.addShape(pickShape, new CANNON.Vec3(0, 0, 0), q);
+            // Align CANNON Box to visual Y-up cylinder (Box natively Y-up, so no rotation needed)
+            body.addShape(pickShape, new CANNON.Vec3(0, 0, 0));
 
             world.addBody(body);
             picksBodies.push(body);
+            
+            const r = Math.floor(i / cols);
+            const c = i % cols;
+            // Add a small height jitter to make them look hand-filled, not completely robotic
+            const yOffset = (Math.random() * 0.3);
+            pickLocalData.push({
+                pos: new THREE.Vector3(startX + c * spacingX, -tinH/2 + pickLength/2 + wallThickness + yOffset, startZ + r * spacingZ),
+                quat: new THREE.Quaternion().setFromEuler(new THREE.Euler((Math.random() - 0.5) * 0.1, (Math.random() - 0.5) * Math.PI, (Math.random() - 0.5) * 0.1))
+            });
         }
 
         // Simple invisible floor to catch shadows
@@ -836,6 +847,43 @@
         floorMesh.position.y = -tinH/2 - 0.1;
         floorMesh.receiveShadow = true;
         scene.add(floorMesh);
+        
+        // Solid physics floor to catch toothpicks
+        const floorBody = new CANNON.Body({
+            type: CANNON.Body.STATIC,
+            shape: new CANNON.Plane(),
+            material: physicsMaterial
+        });
+        floorBody.quaternion.setFromEuler(-Math.PI / 2, 0, 0); // Point +Y
+        floorBody.position.set(0, -tinH/2 - 0.1, 0); 
+        world.addBody(floorBody);
+        
+        // --- Tin Mouse Drag Rotation ---
+        let isDraggingTin = false;
+        let previousMousePosition = { x: 0, y: 0 };
+        const dragArea = renderer.domElement;
+        
+        dragArea.addEventListener('pointerdown', (e) => {
+            if (e.button !== 0 && e.pointerType !== 'touch') return;
+            isDraggingTin = true;
+            previousMousePosition = { x: e.clientX, y: e.clientY };
+        });
+        
+        window.addEventListener('pointermove', (e) => {
+            if(isDraggingTin) {
+                const deltaX = e.clientX - previousMousePosition.x;
+                const deltaY = e.clientY - previousMousePosition.y;
+                
+                const rotX = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1,0,0), deltaY * 0.01);
+                const rotY = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,1,0), deltaX * 0.01);
+                
+                const combined = new THREE.Quaternion().multiplyQuaternions(rotY, rotX);
+                tinGroup.quaternion.multiplyQuaternions(combined, tinGroup.quaternion);
+                previousMousePosition = { x: e.clientX, y: e.clientY };
+            }
+        });
+        
+        window.addEventListener('pointerup', () => { isDraggingTin = false; });
 
         // --- Resize Handler ---
         window.addEventListener('resize', () => {
@@ -857,14 +905,20 @@
 
             controls.update();
 
+            // Sync CANNON Wall Body to visuals
+            wallBody.position.copy(tinGroup.position);
+            wallBody.quaternion.copy(tinGroup.quaternion);
+
             // Calculate View-Relative Gravity
             // We want gravity to always point towards the bottom of the screen
             // The camera's local -Y axis represents "down" on the screen.
             cameraDown.copy(yAxis).transformDirection(camera.matrixWorld);
             world.gravity.set(cameraDown.x * 9.81, cameraDown.y * 9.81, cameraDown.z * 9.81);
 
-            // Step Physics World
-            world.step(1/60, dt, 3);
+            if (state.physicsActive) {
+                // Step Physics World
+                world.step(1/60, dt, 3);
+            }
 
             // Animate lid - rotate along X axis to flip lid backwards/upwards
             const targetAngle = state.lidOpen ? -Math.PI * 0.6 : 0; // open 108 degrees
@@ -884,6 +938,19 @@
             const dummy = new THREE.Object3D();
             for(let i=0; i<pickCount; i++) {
                 const b = picksBodies[i];
+                
+                if (!state.physicsActive) {
+                    // Lock them to tin local space
+                    const loc = pickLocalData[i];
+                    const worldPos = loc.pos.clone().applyMatrix4(tinGroup.matrixWorld);
+                    const worldQuat = loc.quat.clone().premultiply(tinGroup.quaternion);
+                    
+                    b.position.copy(worldPos);
+                    b.quaternion.copy(worldQuat);
+                    b.velocity.set(0,0,0);
+                    b.angularVelocity.set(0,0,0);
+                }
+                
                 dummy.position.copy(b.position);
                 dummy.quaternion.copy(b.quaternion);
                 dummy.updateMatrix();
@@ -908,6 +975,10 @@
         
         document.getElementById('btn-toggle-lid').addEventListener('click', () => {
             state.lidOpen = !state.lidOpen;
+            if (state.lidOpen && !state.physicsActive) {
+                state.physicsActive = true;
+                picksBodies.forEach(b => b.wakeUp()); // Ensure they are awake when lid opens
+            }
         });
         
         // Expose a function to trigger texture updates
@@ -1245,17 +1316,19 @@
         
         function rotateCameraToFace(face) {
             const targets = {
-                front: new THREE.Vector3(0, 0, 12),
-                back: new THREE.Vector3(0, 0, -12),
-                left: new THREE.Vector3(-10, 0, 0),
-                right: new THREE.Vector3(10, 0, 0),
-                top: new THREE.Vector3(0, 12, 2)
+                front: new THREE.Euler(0, 0, 0),
+                back: new THREE.Euler(0, Math.PI, 0),
+                right: new THREE.Euler(0, -Math.PI/2, 0),
+                left: new THREE.Euler(0, Math.PI/2, 0),
+                top: new THREE.Euler(Math.PI/2, 0, 0)
             };
             
-            const targetPos = targets[face];
-            if(!targetPos) return;
-
-            camera.position.copy(targetPos);
+            const targetEuler = targets[face];
+            if(targetEuler) {
+                 tinGroup.quaternion.setFromEuler(targetEuler);
+            }
+            
+            camera.position.set(0, 0, 12);
             camera.lookAt(0, 0, 0);
             controls.target.set(0, 0, 0);
             controls.update();
