@@ -486,6 +486,7 @@
         import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
         import * as CANNON from 'cannon-es';
         import { get, set } from 'https://cdn.jsdelivr.net/npm/idb-keyval@6/+esm';
+        import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js';
 
         // --- App State ---
         const state = {
@@ -773,12 +774,24 @@
         tinGroup.position.y = 0;
 
         // --- Toothpicks ---
-        const pickRadius = 0.05;
+        const pickRadiusCenter = 0.03;
+        const pickRadiusTip = 0.002;
         const pickLength = tinH - 0.7; // Reach close to the rim
         const pickCount = 200; // Dense packing
 
-        // Visual Geometry
-        const mergedPickGeo = new THREE.CylinderGeometry(0.02, 0.02, pickLength, 6);
+        // Visual Geometry: Tapered at both ends to match reference image
+        const tipLength = pickLength * 0.25;
+        const middleLength = pickLength - (tipLength * 2);
+        
+        const middleGeo = new THREE.CylinderGeometry(pickRadiusCenter, pickRadiusCenter, middleLength, 8);
+        
+        const topTipGeo = new THREE.CylinderGeometry(pickRadiusTip, pickRadiusCenter, tipLength, 8);
+        topTipGeo.translate(0, middleLength / 2 + tipLength / 2, 0);
+        
+        const botTipGeo = new THREE.CylinderGeometry(pickRadiusCenter, pickRadiusTip, tipLength, 8);
+        botTipGeo.translate(0, -middleLength / 2 - tipLength / 2, 0);
+
+        const mergedPickGeo = BufferGeometryUtils.mergeGeometries([middleGeo, topTipGeo, botTipGeo]);
 
         const pickMat = new THREE.MeshStandardMaterial({
             color: state.toothpickColor,
@@ -794,8 +807,8 @@
         const dummy = new THREE.Object3D();
         const cols = 15;
         const rows = 14;
-        const spacingX = (tinW - 0.6 - pickRadius*2) / cols;
-        const spacingZ = (tinD - 0.6 - pickRadius*2) / rows;
+        const spacingX = (tinW - 0.6 - pickRadiusCenter*2) / cols;
+        const spacingZ = (tinD - 0.6 - pickRadiusCenter*2) / rows;
         const startX = -((cols-1) * spacingX) / 2;
         const startZ = -((rows-1) * spacingZ) / 2;
 
