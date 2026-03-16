@@ -419,9 +419,9 @@
         <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 20px;">
             <label for="face-bg-color" style="font-size: 14px; font-weight: 600;">Base Color:</label>
             <input type="color" id="face-bg-color" value="#f8f8f8" style="background: none; border: none; cursor: pointer; width: 32px; height: 32px; padding: 0;">
-            <div style="width: 1px; height: 24px; background: var(--panel-border); margin: 0 10px; display: none;"></div>
-            <label for="toothpick-color" style="font-size: 14px; font-weight: 600; display: none;">Toothpicks:</label>
-            <input type="color" id="toothpick-color" value="#e3c38b" style="background: none; border: none; cursor: pointer; width: 32px; height: 32px; padding: 0; display: none;">
+            <div style="width: 1px; height: 24px; background: var(--panel-border); margin: 0 10px;"></div>
+            <label for="toothpick-color" style="font-size: 14px; font-weight: 600;">Toothpicks:</label>
+            <input type="color" id="toothpick-color" value="#e3c38b" style="background: none; border: none; cursor: pointer; width: 32px; height: 32px; padding: 0;">
         </div>
 
         <div class="toolbar">
@@ -774,21 +774,10 @@
 
         // --- Toothpicks ---
         const pickRadius = 0.05;
-        const pickLength = tinH - 1.5; // Make them slightly shorter to fit perfectly inside
-        const pickCount = 0; // Temporarily removed per user request
+        const pickLength = tinH - 0.7; // Reach close to the rim
+        const pickCount = 200; // Dense packing
 
         // Visual Geometry
-        const pickGeo = new THREE.CylinderGeometry(0.01, pickRadius, pickLength, 6);
-        // Make the ends pointy
-        const pickGeometries = [];
-        const middleGeo = new THREE.CylinderGeometry(pickRadius, pickRadius, pickLength - 0.4, 6);
-        const topTipGeo = new THREE.CylinderGeometry(0.01, pickRadius, 0.2, 6);
-        topTipGeo.translate(0, pickLength/2 - 0.1, 0);
-        const botTipGeo = new THREE.CylinderGeometry(pickRadius, 0.01, 0.2, 6);
-        botTipGeo.translate(0, -pickLength/2 + 0.1, 0);
-
-        // Merge them for a nice toothpick shape, but standard cylinder is fine and faster for simple rendering.
-        // We'll use just a tapered cylinder for performance and simplicity in InstancedMesh.
         const mergedPickGeo = new THREE.CylinderGeometry(0.02, 0.02, pickLength, 6);
 
         const pickMat = new THREE.MeshStandardMaterial({
@@ -800,45 +789,44 @@
         const picksInstancedMesh = new THREE.InstancedMesh(mergedPickGeo, pickMat, pickCount);
         picksInstancedMesh.castShadow = true;
         picksInstancedMesh.receiveShadow = true;
-        scene.add(picksInstancedMesh);
 
-        // Physics Bodies for Toothpicks
-        const picksBodies = [];
-        // Use a Box shape. CANNON.Cylinder is notoriously buggy with face-to-face stacking in cannon-es and causes explosions.
-        const pickShape = new CANNON.Box(new CANNON.Vec3(0.02, pickLength/2, 0.02)); 
-        const pickLocalData = []; // Store perfect local offsets
-        
-        const cols = 5;
-        const rows = 6;
-        const spacingX = (tinW - 0.4 - pickRadius*2) / cols;
-        const spacingZ = (tinD - 0.4 - pickRadius*2) / rows;
+        // Pack them neatly inside the tin cavity
+        const dummy = new THREE.Object3D();
+        const cols = 15;
+        const rows = 14;
+        const spacingX = (tinW - 0.6 - pickRadius*2) / cols;
+        const spacingZ = (tinD - 0.6 - pickRadius*2) / rows;
         const startX = -((cols-1) * spacingX) / 2;
         const startZ = -((rows-1) * spacingZ) / 2;
 
-        // Spawn them neatly inside the tin cavity
         for(let i=0; i<pickCount; i++) {
-            const body = new CANNON.Body({
-                mass: 0.1,
-                material: physicsMaterial,
-                allowSleep: true,
-                sleepSpeedLimit: 0.1,
-                sleepTimeLimit: 0.5
-            });
-            // Align CANNON Box to visual Y-up cylinder (Box natively Y-up, so no rotation needed)
-            body.addShape(pickShape, new CANNON.Vec3(0, 0, 0));
-
-            world.addBody(body);
-            picksBodies.push(body);
-            
             const r = Math.floor(i / cols);
             const c = i % cols;
-            // Add a small height jitter to make them look hand-filled, not completely robotic
+            
+            // Add a small jitter to make them look hand-filled
             const yOffset = (Math.random() * 0.3);
-            pickLocalData.push({
-                pos: new THREE.Vector3(startX + c * spacingX, -tinH/2 + pickLength/2 + wallThickness + yOffset, startZ + r * spacingZ),
-                quat: new THREE.Quaternion().setFromEuler(new THREE.Euler((Math.random() - 0.5) * 0.1, (Math.random() - 0.5) * Math.PI, (Math.random() - 0.5) * 0.1))
-            });
+            const xJitter = (Math.random() - 0.5) * 0.05;
+            const zJitter = (Math.random() - 0.5) * 0.05;
+
+            dummy.position.set(
+                startX + c * spacingX + xJitter, 
+                -tinH/2 + pickLength/2 + wallThickness + yOffset, 
+                startZ + r * spacingZ + zJitter
+            );
+            
+            // Slight random tilt
+            dummy.rotation.set(
+                (Math.random() - 0.5) * 0.05,
+                (Math.random() - 0.5) * Math.PI,
+                (Math.random() - 0.5) * 0.05
+            );
+            
+            dummy.updateMatrix();
+            picksInstancedMesh.setMatrixAt(i, dummy.matrix);
         }
+
+        // Add toothpicks DIRECTLY to the tinGroup so they move with it
+        tinGroup.add(picksInstancedMesh);
 
         // Simple invisible floor to catch shadows
         const floorGeo = new THREE.PlaneGeometry(50, 50);
@@ -935,41 +923,6 @@
             lidBody.position.copy(tempPos);
             lidBody.quaternion.copy(tempQuat);
 
-            // Sync Toothpicks
-            const dummy = new THREE.Object3D();
-            for(let i=0; i<pickCount; i++) {
-                const b = picksBodies[i];
-                
-                if (!state.physicsActive) {
-                    // Lock them to tin local space
-                    const loc = pickLocalData[i];
-                    const worldPos = loc.pos.clone().applyMatrix4(tinGroup.matrixWorld);
-                    const worldQuat = loc.quat.clone().premultiply(tinGroup.quaternion);
-                    
-                    b.position.copy(worldPos);
-                    b.quaternion.copy(worldQuat);
-                    b.velocity.set(0,0,0);
-                    b.angularVelocity.set(0,0,0);
-                }
-                
-                dummy.position.copy(b.position);
-                dummy.quaternion.copy(b.quaternion);
-                dummy.updateMatrix();
-                picksInstancedMesh.setMatrixAt(i, dummy.matrix);
-
-                // Auto-respawn if they fall into the void
-                if(b.position.y < -20) {
-                    b.position.set(
-                        (Math.random() - 0.5) * (tinW - 0.5),
-                        tinH + 2 + Math.random(), // drop from slightly above the open lid
-                        (Math.random() - 0.5) * (tinD - 0.5)
-                    );
-                    b.velocity.set(0,0,0);
-                    b.angularVelocity.set(0,0,0);
-                }
-            }
-            picksInstancedMesh.instanceMatrix.needsUpdate = true;
-
             renderer.render(scene, camera);
         }
         animate();
@@ -978,7 +931,6 @@
             state.lidOpen = !state.lidOpen;
             if (state.lidOpen && !state.physicsActive) {
                 state.physicsActive = true;
-                picksBodies.forEach(b => b.wakeUp()); // Ensure they are awake when lid opens
             }
         });
         
