@@ -485,6 +485,7 @@
         import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
         import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
         import * as CANNON from 'cannon-es';
+        import { get, set } from 'https://cdn.jsdelivr.net/npm/idb-keyval@6/+esm';
 
         // --- App State ---
         const state = {
@@ -1406,6 +1407,27 @@
 
         const STORAGE_KEY = 'tinstudio_saves';
 
+        // Migrate Old localStorage saves to IndexedDB
+        (async function migrateSaves() {
+            const oldSaves = localStorage.getItem(STORAGE_KEY);
+            if (oldSaves) {
+                try {
+                    const parsed = JSON.parse(oldSaves);
+                    if (parsed.length > 0) {
+                        const existingIdb = (await get(STORAGE_KEY)) || [];
+                        const merged = [...existingIdb, ...parsed];
+                        // Deduplicate just in case
+                        const unique = merged.filter((v, i, a) => a.findIndex(t => (t.id === v.id)) === i);
+                        await set(STORAGE_KEY, unique);
+                    }
+                    localStorage.removeItem(STORAGE_KEY);
+                    console.log("Migrated localStorage saves to IndexedDB.");
+                } catch(e) {
+                    console.error("Migration failed:", e);
+                }
+            }
+        })();
+
         function showToast(msg) {
             const t = document.getElementById('toast');
             t.textContent = msg;
@@ -1486,7 +1508,7 @@
         }
 
         // Save current design
-        document.getElementById('btn-save-design').addEventListener('click', () => {
+        document.getElementById('btn-save-design').addEventListener('click', async () => {
             const nameInput = document.getElementById('save-name-input');
             const name = nameInput.value.trim() || 'Untitled Design';
             
@@ -1496,7 +1518,7 @@
             // For a simple thumbnail, just use the front face texture canvas
             const thumbBase64 = faceTextures.front.toDataURL('image/jpeg', 0.5);
 
-            const saves = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+            const saves = (await get(STORAGE_KEY)) || [];
             saves.unshift({
                 id: Date.now().toString(),
                 name: name,
@@ -1505,7 +1527,7 @@
                 thumb: thumbBase64
             });
 
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(saves));
+            await set(STORAGE_KEY, saves);
             nameInput.value = '';
             showToast("Design saved!");
             populateDrawer();
@@ -1523,11 +1545,11 @@
         });
 
         // Populate Drawer
-        function populateDrawer() {
+        async function populateDrawer() {
             const container = document.getElementById('saves-list-container');
             container.innerHTML = '';
             
-            const saves = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+            const saves = (await get(STORAGE_KEY)) || [];
             
             if (saves.length === 0) {
                 container.innerHTML = '<div style="color:var(--text-muted); text-align:center; padding: 20px;">No saved designs yet.</div>';
@@ -1581,10 +1603,10 @@
                 const delBtn = document.createElement('button');
                 delBtn.className = 'danger';
                 delBtn.textContent = 'Delete';
-                delBtn.onclick = () => {
+                delBtn.onclick = async () => {
                     if(confirm("Delete this design?")) {
                         const newSaves = saves.filter(s => s.id !== save.id);
-                        localStorage.setItem(STORAGE_KEY, JSON.stringify(newSaves));
+                        await set(STORAGE_KEY, newSaves);
                         populateDrawer();
                     }
                 };
